@@ -116,9 +116,17 @@ void updateOLED() {
     display.print(smoothedDroneV/3, 2);
     display.println(" V");
 
-    display.setTextSize(2);
-    display.setCursor(35,45);
-    display.print("HELIX");
+    display.setCursor(0,45);
+    display.print("MODE : ");
+    if(dataToRX.aux2 > 1500) {
+      display.print("AIRMODE");
+    } else {
+      display.print("ANGLE");
+    }
+
+    //display.setTextSize(2);
+    //display.setCursor(35,45);
+    //display.print("HELIX");
     
     /*display.setCursor(0, 45);
     display.print("RSSI: ");
