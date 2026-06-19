@@ -3,35 +3,32 @@
 #include <nRF24L01.h>
 #include <RF24.h>
 
-
 #define CE_PIN 4
 #define CSN_PIN 5
 #define IBUS_TX 26     
 #define VOLTAGE_PIN 36
 
-
 RF24 radio(CE_PIN, CSN_PIN);
-const byte location[6] = "00001";
+const byte location[5] = "F450";
 
-
-typedef struct drone {
-  int roll, pitch, yaw, throttle, aux2;
-  byte arm, disarm;
+typedef struct __attribute__((packed)) drone {
+  int32_t roll, pitch, yaw, throttle, aux2;
+  uint8_t arm, disarm;
 } packet;
 
-
-typedef struct telemetry {
-  int rawDroneVoltage; // Just the raw 0-4095 ADC value
+typedef struct __attribute__((packed)) telemetry {
+  int32_t rawDroneVoltage;
 } telemPacket;
-
 
 packet dataFromTX;
 telemPacket dataToTX;
 
-
 unsigned long lastRecvTime = 0;
 uint16_t channels[14];
 
+unsigned long lastLoopTime = 0;
+const unsigned long loopInterval = 10; 
+bool wasConnected = true; 
 
 void sendIBUS() {
   uint8_t packet[32];
@@ -48,7 +45,6 @@ void sendIBUS() {
   Serial2.write(packet, 32);
 }
 
-
 void setup() {
   Serial2.begin(115200, SERIAL_8N1, 35, IBUS_TX); 
   pinMode(VOLTAGE_PIN, INPUT);
@@ -62,40 +58,50 @@ void setup() {
   radio.enableAckPayload();
   radio.openReadingPipe(0, location);
   radio.startListening();
+  
+  dataToTX.rawDroneVoltage = analogRead(VOLTAGE_PIN);
+  radio.writeAckPayload(0, &dataToTX, sizeof(dataToTX));
 }
 
-
 void loop() {
+
   if (radio.available()) {
     radio.read(&dataFromTX, sizeof(dataFromTX));
     lastRecvTime = millis();
     
-    // Capture raw battery value and prepare ACK payload
     dataToTX.rawDroneVoltage = analogRead(VOLTAGE_PIN);
     radio.writeAckPayload(0, &dataToTX, sizeof(dataToTX));
+    
+    wasConnected = true;
   }
 
+  unsigned long currentMillis = millis();
+  if (currentMillis - lastLoopTime >= loopInterval) {
+    lastLoopTime = currentMillis;
 
-  bool linkLost = (millis() - lastRecvTime > 500);
-  if (linkLost) {
-    channels[0]=1500; channels[1]=1500; channels[2]=1000; channels[3]=1500;
-    channels[4]=1000; channels[5]=1000;
+    bool linkLost = (millis() - lastRecvTime > 500);
+    if (linkLost) {
+      channels[0]=1500; channels[1]=1500; channels[2]=1000; channels[3]=1500;
+      channels[4]=1000; channels[5]=1000;
 
-    radio.flush_rx(); 
-    radio.stopListening(); 
-    delay(5); 
-    radio.startListening();
-
-  } else {
-    channels[0] = dataFromTX.roll;
-    channels[1] = dataFromTX.pitch;
-    channels[2] = dataFromTX.throttle; 
-    channels[3] = dataFromTX.yaw; 
-    channels[4] = dataFromTX.arm ? 2000 : 1000; 
-    channels[5] = dataFromTX.aux2;
+      if (wasConnected) {
+        wasConnected = false;
+        radio.flush_rx(); 
+        radio.stopListening(); 
+        delay(2); 
+        radio.startListening();
+      }
+    } else {
+      channels[0] = dataFromTX.roll;
+      channels[1] = dataFromTX.pitch;
+      channels[2] = dataFromTX.throttle; 
+      channels[3] = dataFromTX.yaw; 
+      channels[4] = dataFromTX.arm ? 2000 : 1000; 
+      channels[5] = dataFromTX.aux2;
+    }
+    
+    for (int i = 6; i < 14; i++) channels[i] = 1500;
+    
+    sendIBUS();
   }
-  for (int i = 6; i < 14; i++) channels[i] = 1500;
-  
-  sendIBUS();
-  delay(7); // Tight loop for IBUS stability
 }
